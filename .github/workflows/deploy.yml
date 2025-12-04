@@ -63,7 +63,7 @@ jobs:
           ssh ubuntu@${{ secrets.EC2_HOST }} "sudo mkdir -p /opt/app && sudo chown ubuntu:ubuntu /opt/app"
           scp docker-compose.yml ubuntu@${{ secrets.EC2_HOST }}:/opt/app/docker-compose.yml
 
-            - name: Deploy on EC2
+      - name: Deploy on EC2
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} 'bash -s' << 'EOSSH'
           set -e
