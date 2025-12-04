@@ -1,2 +1,2 @@
-fastapi
-uvicorn[standard]
+Django>=5.0,<6.0
+gunicorn
