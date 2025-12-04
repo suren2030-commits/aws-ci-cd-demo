@@ -66,11 +66,25 @@ jobs:
       - name: Deploy on EC2
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} "
+            set -e
+
+            # Images built in earlier steps (values already expanded by GitHub)
             export BACKEND_IMAGE=${BACKEND_IMAGE};
             export FRONTEND_IMAGE=${FRONTEND_IMAGE};
+            export IMAGE_TAG=${IMAGE_TAG};
+
+            # Login to ECR using AWS CLI on EC2 (uses aws configure credentials)
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+              | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com;
+
             cd /opt/app;
-            docker-compose down || true;
+
+            echo \"Deploying backend: \$BACKEND_IMAGE\";
+            echo \"Deploying frontend: \$FRONTEND_IMAGE\";
+
             docker-compose pull;
+            docker-compose down || true;
             docker-compose up -d;
+
             echo \$IMAGE_TAG > last_successful_tag.txt;
           "
