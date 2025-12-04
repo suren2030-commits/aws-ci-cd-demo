@@ -1,0 +1,64 @@
+name: Rollback to previous version
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  FRONTEND_ECR_REPO: ${{ secrets.FRONTEND_ECR_REPO }}
+  BACKEND_ECR_REPO: ${{ secrets.BACKEND_ECR_REPO }}
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add EC2 host to known_hosts
+        run: ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Read previous successful tag from EC2
+        id: read_tag
+        run: |
+          TAG=$(ssh ubuntu@${{ secrets.EC2_HOST }} "cd /opt/app && cat previous_successful_tag.txt 2>/dev/null || echo ''")
+          if [ -z \"$TAG\" ]; then
+            echo 'No previous_successful_tag.txt found on server. Cannot rollback.' >&2
+            exit 1
+          fi
+          echo \"tag=$TAG\" >> $GITHUB_OUTPUT
+
+      - name: Roll back on EC2
+        run: |
+          PREV_TAG=${{ steps.read_tag.outputs.tag }}
+          echo \"Rolling back to tag: $PREV_TAG\"
+
+          REGISTRY=\"${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com\"
+          BACKEND_IMAGE=\"$REGISTRY/${{ env.BACKEND_ECR_REPO }}:$PREV_TAG\"
+          FRONTEND_IMAGE=\"$REGISTRY/${{ env.FRONTEND_ECR_REPO }}:$PREV_TAG\"
+
+          ssh ubuntu@${{ secrets.EC2_HOST }} "
+            set -e
+
+            export BACKEND_IMAGE=$BACKEND_IMAGE;
+            export FRONTEND_IMAGE=$FRONTEND_IMAGE;
+
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+              | docker login --username AWS --password-stdin $REGISTRY;
+
+            cd /opt/app;
+
+            echo \"Rolling back backend to: \$BACKEND_IMAGE\";
+            echo \"Rolling back frontend to: \$FRONTEND_IMAGE\";
+
+            docker-compose pull;
+            docker-compose down || true;
+            docker-compose up -d;
+
+            # After rollback, also update last_successful_tag
+            echo \"$PREV_TAG\" > last_successful_tag.txt;
+          "
