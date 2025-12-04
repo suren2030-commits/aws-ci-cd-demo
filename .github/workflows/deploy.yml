@@ -64,34 +64,36 @@ jobs:
           scp docker-compose.yml ubuntu@${{ secrets.EC2_HOST }}:/opt/app/docker-compose.yml
 
       - name: Deploy on EC2
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
-          ssh ubuntu@${{ secrets.EC2_HOST }} 'bash -s' << 'EOSSH'
-          set -e
+          REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-          # These env vars are already set in the GitHub job, they expand here
-          export BACKEND_IMAGE=${BACKEND_IMAGE}
-          export FRONTEND_IMAGE=${FRONTEND_IMAGE}
-          export IMAGE_TAG=${IMAGE_TAG}
-          export AWS_REGION=${AWS_REGION}
-          export AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
+          ssh ubuntu@${{ secrets.EC2_HOST }} "
+            set -e
 
-          # Login to ECR (AWS CLI on EC2 uses credentials from aws configure)
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+            export BACKEND_IMAGE=${BACKEND_IMAGE}
+            export FRONTEND_IMAGE=${FRONTEND_IMAGE}
+            export IMAGE_TAG=${IMAGE_TAG}
 
-          cd /opt/app
+            cd /opt/app
 
-          # Track previous tag for rollback
-          if [ -f last_successful_tag.txt ]; then
-            mv last_successful_tag.txt previous_successful_tag.txt
-          fi
+            # Login to ECR using AWS CLI on EC2 (credentials from aws configure)
+            aws ecr get-login-password --region ${AWS_REGION} \
+              | docker login --username AWS --password-stdin ${REGISTRY}
 
-          echo "Deploying backend:  $BACKEND_IMAGE"
-          echo "Deploying frontend: $FRONTEND_IMAGE"
+            # Track previous successful tag for rollback
+            if [ -f last_successful_tag.txt ]; then
+              mv last_successful_tag.txt previous_successful_tag.txt
+            fi
 
-          docker-compose pull
-          docker-compose down || true
-          docker-compose up -d
+            echo \"Deploying backend:  \$BACKEND_IMAGE\"
+            echo \"Deploying frontend: \$FRONTEND_IMAGE\"
 
-          echo "$IMAGE_TAG" > last_successful_tag.txt
-          EOSSH
+            docker-compose pull
+            docker-compose down || true
+            docker-compose up -d
+
+            echo \"\$IMAGE_TAG\" > last_successful_tag.txt
+          "
