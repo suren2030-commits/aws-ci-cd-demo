@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AWS CI/CD Demo</title>
+</head>
+<body>
+  <h1>AWS CI/CD Demo Frontend</h1>
+
+  <p>Status: <span id="status">Not checked</span></p>
+
+  <div>
+    <label>
+      Name:
+      <input id="nameInput" type="text" value="Suren" />
+    </label>
+    <button id="helloBtn">Say Hello</button>
+  </div>
+
+  <p>Response: <span id="response"></span></p>
+
+  <script>
+    const statusSpan = document.getElementById("status");
+    const responseSpan = document.getElementById("response");
+    const nameInput = document.getElementById("nameInput");
+    const helloBtn = document.getElementById("helloBtn");
+
+    const BACKEND_BASE = "http://localhost:8000";
+
+    async function checkStatus() {
+      try {
+        const res = await fetch(`${BACKEND_BASE}/`);
+        const data = await res.json();
+        statusSpan.textContent = data.message || JSON.stringify(data);
+      } catch (err) {
+        statusSpan.textContent = "Error talking to backend";
+        console.error(err);
+      }
+    }
+
+    async function sayHello() {
+      const name = encodeURIComponent(nameInput.value || "Suren");
+      try {
+        const res = await fetch(`${BACKEND_BASE}/hello?name=${name}`);
+        const data = await res.json();
+        responseSpan.textContent = data.message || JSON.stringify(data);
+      } catch (err) {
+        responseSpan.textContent = "Error";
+        console.error(err);
+      }
+    }
+
+    helloBtn.addEventListener("click", sayHello);
+
+    // Check backend on load
+    checkStatus();
+  </script>
+</body>
+</html>
