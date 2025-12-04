@@ -63,31 +63,35 @@ jobs:
           ssh ubuntu@${{ secrets.EC2_HOST }} "sudo mkdir -p /opt/app && sudo chown ubuntu:ubuntu /opt/app"
           scp docker-compose.yml ubuntu@${{ secrets.EC2_HOST }}:/opt/app/docker-compose.yml
 
-      - name: Deploy on EC2
+            - name: Deploy on EC2
         run: |
-          ssh ubuntu@${{ secrets.EC2_HOST }} "
-            set -e
+          ssh ubuntu@${{ secrets.EC2_HOST }} 'bash -s' << 'EOSSH'
+          set -e
 
-            export BACKEND_IMAGE=${BACKEND_IMAGE};
-            export FRONTEND_IMAGE=${FRONTEND_IMAGE};
-            export IMAGE_TAG=${IMAGE_TAG};
+          # These env vars are already set in the GitHub job, they expand here
+          export BACKEND_IMAGE=${BACKEND_IMAGE}
+          export FRONTEND_IMAGE=${FRONTEND_IMAGE}
+          export IMAGE_TAG=${IMAGE_TAG}
+          export AWS_REGION=${AWS_REGION}
+          export AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
 
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
-              | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com;
+          # Login to ECR (AWS CLI on EC2 uses credentials from aws configure)
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
-            cd /opt/app;
+          cd /opt/app
 
-            # If there was a previous successful tag, keep it as 'previous'
-            if [ -f last_successful_tag.txt ]; then
-              mv last_successful_tag.txt previous_successful_tag.txt;
-            fi
+          # Track previous tag for rollback
+          if [ -f last_successful_tag.txt ]; then
+            mv last_successful_tag.txt previous_successful_tag.txt
+          fi
 
-            echo \"Deploying backend: \$BACKEND_IMAGE\";
-            echo \"Deploying frontend: \$FRONTEND_IMAGE\";
+          echo "Deploying backend:  $BACKEND_IMAGE"
+          echo "Deploying frontend: $FRONTEND_IMAGE"
 
-            docker-compose pull;
-            docker-compose down || true;
-            docker-compose up -d;
+          docker-compose pull
+          docker-compose down || true
+          docker-compose up -d
 
-            # Save current as last_successful_tag
-            echo \"\$IMAGE_TAG\" > last_successful_tag.txt;
+          echo "$IMAGE_TAG" > last_successful_tag.txt
+          EOSSH
