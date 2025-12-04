@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>AWS CI/CD Demo</title>
 </head>
-<body>
+<body onload="checkStatus()">
   <h1>AWS CI/CD Demo Frontend</h1>
 
   <p>Status: <span id="status">Not checked</span></p>
@@ -28,12 +28,13 @@
     // Backend base URL = same host as frontend, port 8000
     const BACKEND_BASE = `http://${window.location.hostname}:8000`;
 
+    // Debug line: this alone should overwrite "Not checked" if JS runs at all
+    statusSpan.textContent = "JS loaded, checking backend...";
+
     async function checkStatus() {
       try {
         const res = await fetch(`${BACKEND_BASE}/`);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         statusSpan.textContent = data.message || JSON.stringify(data);
       } catch (err) {
@@ -46,9 +47,7 @@
       const name = encodeURIComponent(nameInput.value || "Suren");
       try {
         const res = await fetch(`${BACKEND_BASE}/hello?name=${name}`);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         responseSpan.textContent = data.message || JSON.stringify(data);
       } catch (err) {
@@ -58,9 +57,6 @@
     }
 
     helloBtn.addEventListener("click", sayHello);
-
-    // Run automatically when page loads
-    window.addEventListener("load", checkStatus);
   </script>
 </body>
 </html>
