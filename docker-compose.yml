@@ -2,17 +2,17 @@ version: "3.9"
 
 services:
   backend:
-    build: ./backend
-    container_name: demo-backend
+    image: ${BACKEND_IMAGE}
+    container_name: backend
     ports:
       - "8000:8000"
-    restart: unless-stopped
+    restart: always
 
   frontend:
-    build: ./frontend
-    container_name: demo-frontend
+    image: ${FRONTEND_IMAGE}
+    container_name: frontend
     ports:
-      - "8080:80"
+      - "80:80"
     depends_on:
       - backend
-    restart: unless-stopped
+    restart: always
