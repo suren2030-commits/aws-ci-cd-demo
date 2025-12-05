@@ -1,0 +1,21 @@
+<div class="chart-wrapper">
+  <h3>Performance over last hour</h3>
+
+  <div *ngIf="loading" class="chart-state">
+    <div class="spinner"></div>
+    <p>Loading history…</p>
+  </div>
+
+  <div *ngIf="error" class="chart-state chart-error">
+    <p>⚠️ Unable to load KPI history.</p>
+  </div>
+
+  <div *ngIf="!loading && !error" class="chart-container">
+    <canvas
+      baseChart
+      [data]="lineChartData"
+      [options]="lineChartOptions"
+      [type]="'line'">
+    </canvas>
+  </div>
+</div>

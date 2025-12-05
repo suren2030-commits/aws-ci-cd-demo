@@ -7,11 +7,17 @@ import { Observable } from 'rxjs';
 })
 export class KpiService {
 
-  private apiUrl = `http://${window.location.hostname}:8000/api/kpis/`;
+  private baseUrl = `http://${window.location.hostname}:8000/api`;
 
   constructor(private http: HttpClient) {}
 
+  // Current snapshot
   getKpis(): Observable<any> {
-    return this.http.get(this.apiUrl);
+    return this.http.get(`${this.baseUrl}/kpis/`);
+  }
+
+  // Time-series history for charts
+  getKpiHistory(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/kpis/history/`);
   }
 }

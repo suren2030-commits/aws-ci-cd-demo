@@ -1,11 +1,12 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { KpiService } from './services/kpi.service';
+import { PerformanceChartComponent } from './components/performance-chart/performance-chart.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PerformanceChartComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
@@ -23,7 +24,7 @@ export class AppComponent implements OnInit {
     setInterval(() => this.loadKpis(), 5000);
   }
 
-  loadKpis() {
+  loadKpis(): void {
     this.kpiService.getKpis().subscribe({
       next: (data) => {
         this.kpi = data;
