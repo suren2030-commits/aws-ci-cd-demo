@@ -1,0 +1,17 @@
+<div class="dashboard">
+  <h2>Airport Operations Dashboard</h2>
+
+  <div *ngIf="loading">Loading KPI data...</div>
+  <div *ngIf="error">Backend unreachable</div>
+
+  <div *ngIf="kpi" class="grid">
+    <div class="card">Airport: <strong>{{ kpi.airport }}</strong></div>
+    <div class="card">Timestamp: <strong>{{ kpi.timestamp }}</strong></div>
+    <div class="card">Total Flights: <strong>{{ kpi.total_flights }}</strong></div>
+    <div class="card">On-Time %: <strong>{{ kpi.on_time_percent }}</strong></div>
+    <div class="card">Delayed %: <strong>{{ kpi.delayed_percent }}</strong></div>
+    <div class="card">Active Stands: <strong>{{ kpi.active_stands }}</strong></div>
+    <div class="card">Belts in Use: <strong>{{ kpi.baggage_belts_in_use }}</strong></div>
+    <div class="card">Security Queue: <strong>{{ kpi.security_queue_avg_minutes }} min</strong></div>
+  </div>
+</div>

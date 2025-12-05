@@ -1,0 +1,78 @@
+<div class="page">
+  <header class="top-bar">
+    <div class="title-block">
+      <h1>Airport Operations Dashboard</h1>
+      <p class="subtitle">Live operational snapshot from the APOC</p>
+    </div>
+
+    <div class="meta-block" *ngIf="kpi">
+      <span class="pill airport">
+        ✈️ {{ kpi.airport }}
+      </span>
+      <span class="pill timestamp">
+        ⏱ Updated at:
+        <strong>{{ kpi.timestamp | date:'medium' }}</strong>
+      </span>
+    </div>
+  </header>
+
+  <main class="content">
+    <div *ngIf="loading" class="state state-loading">
+      <div class="spinner"></div>
+      <p>Pulling latest KPI data…</p>
+    </div>
+
+    <div *ngIf="error" class="state state-error">
+      <p>⚠️ Unable to reach backend.</p>
+      <p class="hint">Check if the Django API on port 8000 is running.</p>
+    </div>
+
+    <section *ngIf="kpi && !loading && !error" class="kpi-section">
+      <div class="kpi-row">
+        <div class="kpi-card kpi-primary">
+          <div class="label">Total Flights</div>
+          <div class="value">{{ kpi.total_flights }}</div>
+          <div class="caption">Arrivals + Departures (current window)</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">On-Time Performance</div>
+          <div class="value">
+            {{ kpi.on_time_percent }}%
+          </div>
+          <div class="trend" [class.good]="kpi.on_time_percent >= 90"
+                             [class.warn]="kpi.on_time_percent < 90">
+            <span *ngIf="kpi.on_time_percent >= 90">✅ Healthy</span>
+            <span *ngIf="kpi.on_time_percent < 90">⚠️ At risk</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">Delayed Flights</div>
+          <div class="value">{{ kpi.delayed_percent }}%</div>
+          <div class="caption">Share of flights with delay</div>
+        </div>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="label">Active Stands</div>
+          <div class="value">{{ kpi.active_stands }}</div>
+          <div class="caption">Occupied / in-turnaround</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">Belts in Use</div>
+          <div class="value">{{ kpi.baggage_belts_in_use }}</div>
+          <div class="caption">Baggage reclaim load</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">Security Queue</div>
+          <div class="value">{{ kpi.security_queue_avg_minutes }} mins</div>
+          <div class="caption">Average wait at security</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
