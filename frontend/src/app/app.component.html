@@ -11,23 +11,28 @@
       </span>
       <span class="pill timestamp">
         ⏱ Updated at:
-        <strong>{{ kpi.timestamp | date:'medium' }}</strong>
+        <strong>{{ kpi.timestamp | date: 'medium' }}</strong>
       </span>
     </div>
   </header>
 
   <main class="content">
+    <!-- loading state -->
     <div *ngIf="loading" class="state state-loading">
       <div class="spinner"></div>
       <p>Pulling latest KPI data…</p>
     </div>
 
+    <!-- error state -->
     <div *ngIf="error" class="state state-error">
       <p>⚠️ Unable to reach backend.</p>
       <p class="hint">Check if the Django API on port 8000 is running.</p>
     </div>
 
+    <!-- MAIN KPI GRID (single section) -->
     <section *ngIf="kpi && !loading && !error" class="kpi-section">
+
+      <!-- Row 1: headline KPIs -->
       <div class="kpi-row">
         <div class="kpi-card kpi-primary">
           <div class="label">Total Flights</div>
@@ -37,11 +42,10 @@
 
         <div class="kpi-card">
           <div class="label">On-Time Performance</div>
-          <div class="value">
-            {{ kpi.on_time_percent }}%
-          </div>
-          <div class="trend" [class.good]="kpi.on_time_percent >= 90"
-                             [class.warn]="kpi.on_time_percent < 90">
+          <div class="value">{{ kpi.on_time_percent }}%</div>
+          <div class="trend"
+               [class.good]="kpi.on_time_percent >= 90"
+               [class.warn]="kpi.on_time_percent < 90">
             <span *ngIf="kpi.on_time_percent >= 90">✅ Healthy</span>
             <span *ngIf="kpi.on_time_percent < 90">⚠️ At risk</span>
           </div>
@@ -54,6 +58,7 @@
         </div>
       </div>
 
+      <!-- Row 2: resource utilization -->
       <div class="kpi-row">
         <div class="kpi-card">
           <div class="label">Active Stands</div>
@@ -73,7 +78,50 @@
           <div class="caption">Average wait at security</div>
         </div>
       </div>
+
+      <!-- Row 3: traffic volume -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="label">Arrivals (last hour)</div>
+          <div class="value">{{ kpi.arrivals_last_hour }}</div>
+          <div class="caption">Inbound flights handled</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">Departures (last hour)</div>
+          <div class="value">{{ kpi.departures_last_hour }}</div>
+          <div class="caption">Outbound flights handled</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">Runway Occupancy</div>
+          <div class="value">{{ kpi.runway_occupancy_percent }}%</div>
+          <div class="caption">Runway usage (all runways)</div>
+        </div>
+      </div>
+
+      <!-- Row 4: turnaround + weather -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="label">Average Turnaround</div>
+          <div class="value">{{ kpi.average_turnaround_minutes }} mins</div>
+          <div class="caption">Gate in → gate out</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="label">Weather</div>
+          <div class="value">{{ kpi.weather_condition }}</div>
+          <div class="caption">
+            {{ kpi.temperature_c }}&deg;C at field
+          </div>
+        </div>
+
+        <!-- empty slot to keep grid layout -->
+        <div class="kpi-card" style="opacity: 0; pointer-events: none;"></div>
+      </div>
     </section>
+
+    <!-- Chart section -->
+    <app-performance-chart></app-performance-chart>
   </main>
- <app-performance-chart></app-performance-chart>
 </div>
