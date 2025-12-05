@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BaseChartDirective } from 'ng2-charts';
 import { ChartConfiguration } from 'chart.js';
@@ -11,7 +11,10 @@ import { KpiService } from '../../services/kpi.service';
   templateUrl: './performance-chart.component.html',
   styleUrls: ['./performance-chart.component.scss']
 })
-export class PerformanceChartComponent implements OnInit {
+export class PerformanceChartComponent implements OnInit, OnDestroy {
+
+  private readonly REFRESH_MS = 30000; // 30 seconds
+  private refreshHandle: any;
 
   loading = true;
   error = false;
@@ -47,6 +50,13 @@ export class PerformanceChartComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadHistory();
+    this.refreshHandle = setInterval(() => this.loadHistory(), this.REFRESH_MS);
+  }
+
+  ngOnDestroy(): void {
+    if (this.refreshHandle) {
+      clearInterval(this.refreshHandle);
+    }
   }
 
   private loadHistory(): void {

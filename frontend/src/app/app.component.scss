@@ -210,3 +210,28 @@
   color: #b7c0d6;
   margin-top: 4px;
 }
+
+.kpi-section.just-updated {
+  animation: kpiPulse 0.6s ease-out;
+}
+
+@keyframes kpiPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(56, 189, 248, 0);
+  }
+  40% {
+    transform: scale(1.01);
+    box-shadow: 0 0 24px rgba(56, 189, 248, 0.25);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+
+.pill-note {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}

@@ -10,8 +10,9 @@
       ✈️ Domestic & International
     </span>
     <span class="pill timestamp">
-      ⏱ Updated at:
+     ⏱ Updated at:
       <strong>{{ kpi.timestamp | date:'medium' }}</strong>
+     <span class="pill-note">(auto-refresh 15s)</span>
     </span>
   </div>
  </header>
@@ -29,7 +30,7 @@
     </div>
 
     <!-- MAIN KPI GRID (single section) -->
-    <section *ngIf="kpi && !loading && !error" class="kpi-section">
+    <section *ngIf="kpi && !loading && !error" class="kpi-section" [class.just-updated]="justUpdated">
 
       <!-- Row 1: headline KPIs -->
       <div class="kpi-row">
