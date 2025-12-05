@@ -197,3 +197,16 @@
     transform: rotate(360deg);
   }
 }
+
+.gradient-title {
+  background: linear-gradient(90deg, #4facfe, #38f9d7, #ff9a9e, #fad0c4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  color: #b7c0d6;
+  margin-top: 4px;
+}

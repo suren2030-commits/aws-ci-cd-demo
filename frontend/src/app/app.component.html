@@ -1,21 +1,20 @@
 <div class="page">
-  <header class="top-bar">
-    <div class="title-block">
-      <h1>Airport Operations Dashboard</h1>
-      <p class="subtitle">Live operational snapshot from the APOC</p>
-    </div>
+ <header class="top-bar">
+  <div class="title-block">
+    <h1 class="gradient-title">Airport Operations Dashboard</h1>
+    <p class="subtitle">Live Operational Status — Developed by Suren</p>
+  </div>
 
-    <div class="meta-block" *ngIf="kpi">
-      <span class="pill airport">
-        ✈️ {{ kpi.airport }}
-      </span>
-      <span class="pill timestamp">
-        ⏱ Updated at:
-        <strong>{{ kpi.timestamp | date: 'medium' }}</strong>
-      </span>
-    </div>
-  </header>
-
+  <div class="meta-block" *ngIf="kpi">
+    <span class="pill airport">
+      ✈️ Domestic & International
+    </span>
+    <span class="pill timestamp">
+      ⏱ Updated at:
+      <strong>{{ kpi.timestamp | date:'medium' }}</strong>
+    </span>
+  </div>
+ </header>
   <main class="content">
     <!-- loading state -->
     <div *ngIf="loading" class="state state-loading">
