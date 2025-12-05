@@ -1,6 +1,7 @@
 from django.urls import path
-from .views import kpi_overview
+from .views import kpi_overview, kpi_history
 
 urlpatterns = [
     path("kpis/", kpi_overview, name="kpi-overview"),
+    path("kpis/history/", kpi_history, name="kpi-history"),
 ]
