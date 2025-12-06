@@ -107,6 +107,10 @@ jobs:
       FRONTEND_IMAGE: ${{ needs.build-and-push-images.outputs.frontend_image }}
 
     steps:
+      # 🔹 THIS IS THE MISSING PART
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -138,11 +142,9 @@ jobs:
 
             cd /opt/app
 
-            # Login to ECR from EC2
             aws ecr get-login-password --region \${AWS_REGION} \
               | docker login --username AWS --password-stdin \${REGISTRY}
 
-            # Track previous successful tag for rollback
             if [ -f last_successful_tag.txt ]; then
               mv last_successful_tag.txt previous_successful_tag.txt
             fi
