@@ -16,6 +16,25 @@
     </span>
   </div>
  </header>
+
+<div *ngIf="kpi && !loading && !error"
+     class="status-banner"
+     [ngClass]="statusLevel">
+  <span class="icon">
+    <ng-container [ngSwitch]="statusLevel">
+      <span *ngSwitchCase="'good'">🟢</span>
+      <span *ngSwitchCase="'warn'">🟠</span>
+      <span *ngSwitchCase="'bad'">🔴</span>
+    </ng-container>
+  </span>
+  <div>
+    <span class="title">{{ statusTitle }}</span>
+    <span class="details" *ngIf="statusMessages.length">
+      — {{ statusMessages.join(' • ') }}
+    </span>
+  </div>
+</div>
+
   <main class="content">
     <!-- loading state -->
     <div *ngIf="loading" class="state state-loading">
