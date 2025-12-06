@@ -7,9 +7,20 @@ import { Observable } from 'rxjs';
 })
 export class KpiService {
 
-  private baseUrl = `http://${window.location.hostname}:8000/api`;
+  private baseUrl: string;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    const hostname = window.location.hostname;
+
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      // Local dev -> talk directly to Django on localhost
+      this.baseUrl = 'http://localhost:8000/api';
+    } else {
+      // Production -> always talk to backend via ALB
+      this.baseUrl = 'http://airport-alb-1437043109.ap-south-1.elb.amazonaws.com/api';
+      // ^ use your exact ALB DNS name here (no / at the end)
+    }
+  }
 
   // Current snapshot
   getKpis(): Observable<any> {
