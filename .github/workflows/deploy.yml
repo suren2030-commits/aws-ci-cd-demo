@@ -11,9 +11,49 @@ env:
   FRONTEND_ECR_REPO: ${{ secrets.FRONTEND_ECR_REPO }}
   BACKEND_ECR_REPO: ${{ secrets.BACKEND_ECR_REPO }}
 
+# ============================================================
+# 1) Build & (optional) test stage
+# ============================================================
 jobs:
-  build-and-deploy:
+  build-and-test:
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ---- Optional backend sanity check ----
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Backend check (optional)
+        working-directory: backend
+        run: |
+          python -m pip install -r requirements.txt
+          # Basic Django sanity check; uncomment tests when you add them
+          python manage.py check
+          # python manage.py test
+
+      # ---- Optional frontend sanity build ----
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Frontend build (optional)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  # ============================================================
+  # 2) Build & push images to ECR
+  # ============================================================
+  build-and-push-images:
+    runs-on: ubuntu-latest
+    needs: build-and-test
 
     steps:
       - name: Checkout code
@@ -33,24 +73,46 @@ jobs:
       - name: Build and push backend image
         run: |
           IMAGE_TAG=${GITHUB_SHA::7}
-          BACKEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${BACKEND_ECR_REPO}:$IMAGE_TAG"
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          BACKEND_IMAGE="${REGISTRY}/${BACKEND_ECR_REPO}:${IMAGE_TAG}"
 
-          docker build -t "$BACKEND_IMAGE" ./backend
-          docker push "$BACKEND_IMAGE"
+          echo "Building backend image: ${BACKEND_IMAGE}"
 
-          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          docker build -t "${BACKEND_IMAGE}" ./backend
+          # optional latest tag:
+          docker tag "${BACKEND_IMAGE}" "${REGISTRY}/${BACKEND_ECR_REPO}:latest"
+
+          docker push "${BACKEND_IMAGE}"
+          docker push "${REGISTRY}/${BACKEND_ECR_REPO}:latest"
 
       - name: Build and push frontend image
         run: |
-          FRONTEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${FRONTEND_ECR_REPO}:$IMAGE_TAG"
+          IMAGE_TAG=${GITHUB_SHA::7}
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          FRONTEND_IMAGE="${REGISTRY}/${FRONTEND_ECR_REPO}:${IMAGE_TAG}"
 
-          docker build -t "$FRONTEND_IMAGE" ./frontend
-          docker push "$FRONTEND_IMAGE"
+          echo "Building frontend image: ${FRONTEND_IMAGE}"
 
-          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
+          docker build -t "${FRONTEND_IMAGE}" ./frontend
+          # optional latest tag:
+          docker tag "${FRONTEND_IMAGE}" "${REGISTRY}/${FRONTEND_ECR_REPO}:latest"
 
-      - name: Setup SSH
+          docker push "${FRONTEND_IMAGE}"
+          docker push "${REGISTRY}/${FRONTEND_ECR_REPO}:latest"
+
+  # ============================================================
+  # 3) Deploy to EC2 using docker-compose
+  #    Also maintain last/previous successful tags for rollback
+  # ============================================================
+  deploy-on-ec2:
+    runs-on: ubuntu-latest
+    needs: build-and-push-images
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -68,32 +130,42 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
+          # Build image names using the same short SHA tag
+          IMAGE_TAG=${GITHUB_SHA::7}
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          BACKEND_IMAGE="${REGISTRY}/${BACKEND_ECR_REPO}:${IMAGE_TAG}"
+          FRONTEND_IMAGE="${REGISTRY}/${FRONTEND_ECR_REPO}:${IMAGE_TAG}"
+
+          echo "Deploying tag: ${IMAGE_TAG}"
+          echo "Backend image:  ${BACKEND_IMAGE}"
+          echo "Frontend image: ${FRONTEND_IMAGE}"
 
           ssh ubuntu@${{ secrets.EC2_HOST }} "
             set -e
 
+            cd /opt/app
+
+            export AWS_REGION=${AWS_REGION}
+            export REGISTRY=${REGISTRY}
             export BACKEND_IMAGE=${BACKEND_IMAGE}
             export FRONTEND_IMAGE=${FRONTEND_IMAGE}
             export IMAGE_TAG=${IMAGE_TAG}
 
-            cd /opt/app
+            # Log in to ECR from EC2 instance
+            aws ecr get-login-password --region \${AWS_REGION} \
+              | docker login --username AWS --password-stdin \${REGISTRY}
 
-            # Login to ECR using AWS CLI on EC2 (credentials from aws configure)
-            aws ecr get-login-password --region ${AWS_REGION} \
-              | docker login --username AWS --password-stdin ${REGISTRY}
-
-            # Track previous successful tag for rollback
+            # Track last and previous successful tags for rollback
             if [ -f last_successful_tag.txt ]; then
               mv last_successful_tag.txt previous_successful_tag.txt
             fi
 
-            echo \"Deploying backend:  \$BACKEND_IMAGE\"
-            echo \"Deploying frontend: \$FRONTEND_IMAGE\"
+            echo \"Deploying backend:  \${BACKEND_IMAGE}\"
+            echo \"Deploying frontend: \${FRONTEND_IMAGE}\"
 
-            docker-compose pull
-            docker-compose down || true
-            docker-compose up -d
+            BACKEND_IMAGE=\${BACKEND_IMAGE} FRONTEND_IMAGE=\${FRONTEND_IMAGE} docker-compose pull
+            BACKEND_IMAGE=\${BACKEND_IMAGE} FRONTEND_IMAGE=\${FRONTEND_IMAGE} docker-compose down || true
+            BACKEND_IMAGE=\${BACKEND_IMAGE} FRONTEND_IMAGE=\${FRONTEND_IMAGE} docker-compose up -d
 
-            echo \"\$IMAGE_TAG\" > last_successful_tag.txt
+            echo \"\${IMAGE_TAG}\" > last_successful_tag.txt
           "
