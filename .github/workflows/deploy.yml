@@ -33,8 +33,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Add any tests you want here (lint, unit tests, etc.)
-      # For now we just verify that the repo is present.
+      # Placeholder for real tests
       - name: Show repo contents
         run: ls -R
 
@@ -105,9 +104,10 @@ jobs:
       IMAGE_TAG: ${{ needs.build-and-push-images.outputs.image_tag }}
       BACKEND_IMAGE: ${{ needs.build-and-push-images.outputs.backend_image }}
       FRONTEND_IMAGE: ${{ needs.build-and-push-images.outputs.frontend_image }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
     steps:
-      # 🔹 THIS IS THE MISSING PART
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -125,38 +125,56 @@ jobs:
           scp docker-compose.yml ubuntu@${{ secrets.EC2_HOST }}:/opt/app/docker-compose.yml
 
       - name: Deploy on EC2
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
           ssh ubuntu@${{ secrets.EC2_HOST }} "
             set -e
 
-            export BACKEND_IMAGE=${BACKEND_IMAGE}
-            export FRONTEND_IMAGE=${FRONTEND_IMAGE}
-            export IMAGE_TAG=${IMAGE_TAG}
-            export AWS_REGION=${AWS_REGION}
-            export REGISTRY=${REGISTRY}
+            APP_DIR=/opt/app
+            cd \$APP_DIR
 
-            cd /opt/app
+            BACKEND_IMAGE='${BACKEND_IMAGE}'
+            FRONTEND_IMAGE='${FRONTEND_IMAGE}'
+            IMAGE_TAG='${IMAGE_TAG}'
+            AWS_REGION='${AWS_REGION}'
+            AWS_ACCOUNT_ID='${AWS_ACCOUNT_ID}'
+            REGISTRY='${REGISTRY}'
 
-            aws ecr get-login-password --region \${AWS_REGION} \
-              | docker login --username AWS --password-stdin \${REGISTRY}
+            echo \"Login to ECR: \$REGISTRY\"
+            aws ecr get-login-password --region \$AWS_REGION \
+              | docker login --username AWS --password-stdin \$REGISTRY
 
+            echo \"Deploying backend:  \$BACKEND_IMAGE\"
+            echo \"Deploying frontend: \$FRONTEND_IMAGE\"
+
+            # Write .env for docker compose variable interpolation
+            cat > .env <<EOT
+BACKEND_IMAGE=\$BACKEND_IMAGE
+FRONTEND_IMAGE=\$FRONTEND_IMAGE
+IMAGE_TAG=\$IMAGE_TAG
+AWS_REGION=\$AWS_REGION
+REGISTRY=\$REGISTRY
+EOT
+
+            # Simple 1-level rollback tracking
             if [ -f last_successful_tag.txt ]; then
               mv last_successful_tag.txt previous_successful_tag.txt
             fi
 
-            echo \"Deploying backend:  \${BACKEND_IMAGE}\"
-            echo \"Deploying frontend: \${FRONTEND_IMAGE}\"
+            echo \"Validating compose config...\"
+            docker compose config >/dev/null
 
-            BACKEND_IMAGE=\${BACKEND_IMAGE} FRONTEND_IMAGE=\${FRONTEND_IMAGE} docker-compose pull
-            BACKEND_IMAGE=\${BACKEND_IMAGE} FRONTEND_IMAGE=\${FRONTEND_IMAGE} docker-compose down || true
-            BACKEND_IMAGE=\${BACKEND_IMAGE} FRONTEND_IMAGE=\${FRONTEND_IMAGE} docker-compose up -d
+            echo \"Pulling images...\"
+            docker compose pull
 
-            echo \"\${IMAGE_TAG}\" > last_successful_tag.txt
+            echo \"Restarting containers...\"
+            docker compose down || true
+            docker compose up -d
+
+            echo \"\$IMAGE_TAG\" > last_successful_tag.txt
+
+            echo \"Deployment complete. Current tag: \$IMAGE_TAG\"
           "
 
   # ======================================================
