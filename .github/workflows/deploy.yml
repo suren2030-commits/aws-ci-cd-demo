@@ -4,13 +4,12 @@ on:
   push:
     branches: [ "main" ]
 
-  # Manual trigger with optional dry-run
   workflow_dispatch:
     inputs:
       dry_run:
         description: "If true, run build & push images only (NO deploy to EC2)"
         required: true
-        default: "false"   # normal deploy by default
+        default: "false"
         type: choice
         options:
           - "false"
@@ -22,10 +21,10 @@ env:
   FRONTEND_ECR_REPO: ${{ secrets.FRONTEND_ECR_REPO }}
   BACKEND_ECR_REPO: ${{ secrets.BACKEND_ECR_REPO }}
 
+# ======================================================
+# 1) Build and test
+# ======================================================
 jobs:
-  # ======================================================
-  # 1) Optional: basic build / tests
-  # ======================================================
   build-and-test:
     runs-on: ubuntu-latest
 
@@ -33,7 +32,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Placeholder for real tests
       - name: Show repo contents
         run: ls -R
 
@@ -73,9 +71,9 @@ jobs:
           BACKEND_IMAGE="$REGISTRY/${BACKEND_ECR_REPO}:$IMAGE_TAG"
           FRONTEND_IMAGE="$REGISTRY/${FRONTEND_ECR_REPO}:$IMAGE_TAG"
 
-          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "backend_image=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
-          echo "frontend_image=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "backend_image=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=$FRONTEND_IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
         run: |
@@ -90,7 +88,7 @@ jobs:
           docker push "${{ steps.meta.outputs.frontend_image }}"
 
   # ======================================================
-  # 3) Deploy to EC2  (skipped when dry_run == "true")
+  # 3) Deploy to EC2 (skipped when dry_run == "true")
   # ======================================================
   deploy-on-ec2:
     runs-on: ubuntu-latest
@@ -128,62 +126,40 @@ jobs:
         run: |
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-          ssh ubuntu@${{ secrets.EC2_HOST }} "
-            set -e
+          ssh ubuntu@${{ secrets.EC2_HOST }} << EOF
+          set -e
 
-            APP_DIR=/opt/app
-            cd \$APP_DIR
+          export BACKEND_IMAGE="${BACKEND_IMAGE}"
+          export FRONTEND_IMAGE="${FRONTEND_IMAGE}"
+          export IMAGE_TAG="${IMAGE_TAG}"
+          export AWS_REGION="${AWS_REGION}"
+          export REGISTRY="${REGISTRY}"
 
-            BACKEND_IMAGE='${BACKEND_IMAGE}'
-            FRONTEND_IMAGE='${FRONTEND_IMAGE}'
-            IMAGE_TAG='${IMAGE_TAG}'
-            AWS_REGION='${AWS_REGION}'
-            AWS_ACCOUNT_ID='${AWS_ACCOUNT_ID}'
-            REGISTRY='${REGISTRY}'
+          cd /opt/app
 
-            echo \"Login to ECR: \$REGISTRY\"
-            aws ecr get-login-password --region \$AWS_REGION \
-              | docker login --username AWS --password-stdin \$REGISTRY
+          aws ecr get-login-password --region \$AWS_REGION \
+            | docker login --username AWS --password-stdin \$REGISTRY
 
-            echo \"Deploying backend:  \$BACKEND_IMAGE\"
-            echo \"Deploying frontend: \$FRONTEND_IMAGE\"
+          if [ -f last_successful_tag.txt ]; then
+            mv last_successful_tag.txt previous_successful_tag.txt
+          fi
 
-            # Write .env for docker compose variable interpolation
-            cat > .env <<EOT
-BACKEND_IMAGE=\$BACKEND_IMAGE
-FRONTEND_IMAGE=\$FRONTEND_IMAGE
-IMAGE_TAG=\$IMAGE_TAG
-AWS_REGION=\$AWS_REGION
-REGISTRY=\$REGISTRY
-EOT
+          echo "Deploying backend:  \$BACKEND_IMAGE"
+          echo "Deploying frontend: \$FRONTEND_IMAGE"
 
-            # Simple 1-level rollback tracking
-            if [ -f last_successful_tag.txt ]; then
-              mv last_successful_tag.txt previous_successful_tag.txt
-            fi
+          BACKEND_IMAGE=\$BACKEND_IMAGE FRONTEND_IMAGE=\$FRONTEND_IMAGE docker-compose pull
+          BACKEND_IMAGE=\$BACKEND_IMAGE FRONTEND_IMAGE=\$FRONTEND_IMAGE docker-compose down || true
+          BACKEND_IMAGE=\$BACKEND_IMAGE FRONTEND_IMAGE=\$FRONTEND_IMAGE docker-compose up -d
 
-            echo \"Validating compose config...\"
-            docker compose config >/dev/null
-
-            echo \"Pulling images...\"
-            docker compose pull
-
-            echo \"Restarting containers...\"
-            docker compose down || true
-            docker compose up -d
-
-            echo \"\$IMAGE_TAG\" > last_successful_tag.txt
-
-            echo \"Deployment complete. Current tag: \$IMAGE_TAG\"
-          "
+          echo "\$IMAGE_TAG" > last_successful_tag.txt
+          EOF
 
   # ======================================================
-  # 4) Optional: explicit dry-run summary (runs only when deploy skipped)
+  # 4) Dry-run summary (only when deploy is skipped)
   # ======================================================
   dry-run-summary:
     runs-on: ubuntu-latest
     needs: build-and-push-images
-
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
 
     steps:
