@@ -68,3 +68,15 @@ def kpi_history(request):
         )
 
     return JsonResponse({"points": points})
+
+def health(request):
+    """
+    Simple health check endpoint.
+    Used by AWS ALB / monitoring to verify the app is alive.
+    """
+    # If needed later, we can add DB checks here.
+    data = {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+    return JsonResponse(data)
