@@ -1,7 +1,16 @@
 name: Manual Rollback (Frontend + Backend)
 
 on:
-  workflow_dispatch:   # manual trigger only
+  workflow_dispatch:
+    inputs:
+      backend_backup:
+        description: "Backend backup folder name (leave empty for latest)"
+        required: false
+        default: ""
+      frontend_backup:
+        description: "Frontend backup folder name (leave empty for latest)"
+        required: false
+        default: ""
 
 jobs:
   rollback:
@@ -18,4 +27,4 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/jump_key \
             ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-            "bash ~/deploy_scripts/rollback_all.sh"
+            "bash ~/deploy_scripts/rollback_all.sh '${{ github.event.inputs.backend_backup }}' '${{ github.event.inputs.frontend_backup }}'"
