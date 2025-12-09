@@ -1,0 +1,21 @@
+name: Manual Rollback (Frontend + Backend)
+
+on:
+  workflow_dispatch:   # manual trigger only
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH key for jumpserver
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/jump_key
+          chmod 600 ~/.ssh/jump_key
+
+      - name: Run unified rollback on jumpserver
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/jump_key \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+            "bash ~/deploy_scripts/rollback_all.sh"
