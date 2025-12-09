@@ -1,0 +1,63 @@
+name: Deploy Backend via Jumpserver
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2) Setup Python
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 3) Install deps and basic Django check (CI only, no deploy yet)
+      - name: Install backend dependencies and run Django check
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python manage.py check
+
+      # 4) Prepare backend package to upload (exclude venv, pycache, db)
+      - name: Prepare backend package
+        run: |
+          mkdir -p backend_package
+          rsync -av \
+            --exclude 'venv' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude 'db.sqlite3' \
+            backend/ backend_package/
+
+      # 5) Set up SSH key to reach jumpserver
+      - name: Set up SSH key for jumpserver
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/jump_key
+          chmod 600 ~/.ssh/jump_key
+
+      # 6) Upload backend package to jumpserver: ~/backend_build
+      - name: Upload backend code to jumpserver
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/jump_key \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} "rm -rf ~/backend_build/*"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/jump_key -r \
+            backend_package/* \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/backend_build/
+
+      # 7) Run backend deploy script on jumpserver
+      - name: Run backend deploy script on jumpserver
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/jump_key \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+            "bash ~/deploy_scripts/deploy_backend.sh"
