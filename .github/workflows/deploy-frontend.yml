@@ -1,0 +1,50 @@
+name: Deploy Frontend via Jumpserver
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      # STEP 1: Checkout code
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # STEP 2: Install Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      # STEP 3: Install dependencies
+      - name: Install Dependencies
+        run: npm install --prefix frontend
+
+      # STEP 4: Build Angular (browser build)
+      - name: Build Frontend
+        run: npm run build --prefix frontend
+
+      # STEP 5: Prepare SSH key
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/jump_key
+          chmod 600 ~/.ssh/jump_key
+
+      # STEP 6: Upload built files to jumpserver
+      - name: Upload Build to Jumpserver
+        run: |
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/jump_key -r \
+            frontend/dist/frontend/browser/* \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/frontend_build/
+
+      # STEP 7: Run deploy script on jumpserver
+      - name: Execute Deploy Script on Jumpserver
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/jump_key \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+            "bash ~/deploy_scripts/deploy_frontend.sh"
