@@ -1,5 +1,5 @@
 from django.urls import path
-from .views_health import health
+from .health import health
 
 urlpatterns = [
     # health endpoint: will be available as /api/health once included at project level
