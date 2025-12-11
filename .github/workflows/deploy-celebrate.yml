@@ -1,0 +1,225 @@
+name: Multi-stage Deploy (Celebrate)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/deploy-celebrate.yml'
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: "Which apps to deploy: frontend, backend, both, or auto"
+        required: true
+        default: "auto"
+
+concurrency:
+  group: "deploy-celebrate-${{ github.ref_name || 'manual' }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REMOTE_APP_DIR: ${{ secrets.REMOTE_APP_DIR }}
+  JUMP_USER: ${{ secrets.JUMP_USER }}
+  JUMP_HOST: ${{ secrets.JUMP_HOST }}
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+  FRONTEND_HEALTH: "https://celebrate.example.com/health"      # <<-- change to your real url
+  BACKEND_HEALTH: "https://celebrate.example.com/api/health"  # <<-- change to your real url
+  HEALTH_STATUS: "200"
+
+jobs:
+  determine:
+    name: Determine changed apps / intent
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_should_run: ${{ steps.set.outputs.frontend }}
+      backend_should_run: ${{ steps.set.outputs.backend }}
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide which apps to run
+        id: set
+        run: |
+          INPUT="${{ github.event.inputs.apps || 'auto' }}"
+          FRONT=false
+          BACK=false
+
+          if [ "$INPUT" != "auto" ]; then
+            case "$INPUT" in
+              frontend) FRONT=true ;;
+              backend) BACK=true ;;
+              both) FRONT=true; BACK=true ;;
+              *) FRONT=false; BACK=false ;;
+            esac
+          else
+            if [ "${{ github.event_name }}" = "push" ]; then
+              BASE="${{ github.event.before }}"
+              HEAD="${{ github.sha }}"
+              if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+                FILES=$(git ls-files)
+              else
+                FILES=$(git diff --name-only "$BASE" "$HEAD")
+              fi
+              echo "$FILES" | grep -qE '^frontend/' && FRONT=true || true
+              echo "$FILES" | grep -qE '^backend/' && BACK=true || true
+            fi
+          fi
+
+          echo "frontend=$FRONT" >> "$GITHUB_OUTPUT"
+          echo "backend=$BACK" >> "$GITHUB_OUTPUT"
+          echo "Determined: frontend=$FRONT backend=$BACK"
+
+  build-frontend:
+    name: Build Frontend
+    needs: determine
+    if: needs.determine.outputs.frontend_should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install frontend deps
+        run: npm ci --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+      - name: Zip frontend dist
+        run: |
+          cd frontend
+          zip -r ../frontend-dist.zip dist || true
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist.zip
+
+  build-backend:
+    name: Build Backend
+    needs: determine
+    if: needs.determine.outputs.backend_should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install test deps & run Django check
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python manage.py check
+      - name: Package backend
+        run: |
+          mkdir -p backend_package
+          rsync -av --exclude 'venv' --exclude '__pycache__' --exclude '*.pyc' --exclude 'db.sqlite3' backend/ backend_package/
+          tar -czf backend-artifact.tar.gz backend_package
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-artifact
+          path: backend-artifact.tar.gz
+
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: build-frontend
+    if: needs.determine.outputs.frontend_should_run == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: "deploy-frontend-celebrate"
+      cancel-in-progress: true
+    steps:
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: .
+      - name: Setup ssh-agent and load key
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.JUMP_SSH_KEY }}
+      - name: Copy artifact to jumpserver
+        run: |
+          scp -o StrictHostKeyChecking=no frontend-dist.zip ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/frontend_build/frontend-dist.zip
+      - name: Remote deploy + health-check (on jumpserver)
+        env:
+          REMOTE_APP_DIR: ${{ env.REMOTE_APP_DIR }}
+          FRONTEND_HEALTH: ${{ env.FRONTEND_HEALTH }}
+          HEALTH_STATUS: ${{ env.HEALTH_STATUS }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} bash -s <<'REMOTE'
+            set -euo pipefail
+            ART="$HOME/frontend_build/frontend-dist.zip"
+            bash ~/deploy_scripts/deploy_frontend.sh "$ART" "${REMOTE_APP_DIR}" "nginx"
+            if ~/deploy_scripts/health_check.sh "${FRONTEND_HEALTH}" "${HEALTH_STATUS}" "" 6 5; then
+              echo "FRONTEND OK"
+            else
+              echo "FRONTEND HEALTH CHECK FAILED - ROLLING BACK" >&2
+              ~/deploy_scripts/rollback_to_previous.sh "${REMOTE_APP_DIR}"
+              exit 1
+            fi
+REMOTE
+      - name: Notify Slack (frontend)
+        if: ${{ env.SLACK_WEBHOOK != '' }}
+        run: |
+          TEXT="Frontend deployed to Celebrate by $GITHUB_ACTOR (branch $GITHUB_REF)"
+          PAYLOAD=$(printf '{"text":"%s"}' "$TEXT")
+          curl -s -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "${{ env.SLACK_WEBHOOK }}" || true
+
+  deploy-backend:
+    name: Deploy Backend
+    needs: build-backend
+    if: needs.determine.outputs.backend_should_run == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: "deploy-backend-celebrate"
+      cancel-in-progress: true
+    steps:
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-artifact
+          path: .
+      - name: Setup ssh-agent and load key
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.JUMP_SSH_KEY }}
+      - name: Copy backend artifact to jumpserver
+        run: |
+          scp -o StrictHostKeyChecking=no backend-artifact.tar.gz ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/backend_build/backend-artifact.tar.gz
+      - name: Remote deploy + health-check (on jumpserver)
+        env:
+          REMOTE_APP_DIR: ${{ env.REMOTE_APP_DIR }}
+          BACKEND_HEALTH: ${{ env.BACKEND_HEALTH }}
+          HEALTH_STATUS: ${{ env.HEALTH_STATUS }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} bash -s <<'REMOTE'
+            set -euo pipefail
+            ART="$HOME/backend_build/backend-artifact.tar.gz"
+            bash ~/deploy_scripts/deploy_backend.sh "$ART" "${REMOTE_APP_DIR}" "celebrate-backend"
+            if ~/deploy_scripts/health_check.sh "${BACKEND_HEALTH}" "${HEALTH_STATUS}" "" 6 5; then
+              echo "BACKEND OK"
+            else
+              echo "BACKEND HEALTH CHECK FAILED - ROLLING BACK" >&2
+              ~/deploy_scripts/rollback_to_previous.sh "${REMOTE_APP_DIR}"
+              exit 1
+            fi
+REMOTE
+      - name: Notify Slack (backend)
+        if: ${{ env.SLACK_WEBHOOK != '' }}
+        run: |
+          TEXT="Backend deployed to Celebrate by $GITHUB_ACTOR (branch $GITHUB_REF)"
+          PAYLOAD=$(printf '{"text":"%s"}' "$TEXT")
+          curl -s -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "${{ env.SLACK_WEBHOOK }}" || true
