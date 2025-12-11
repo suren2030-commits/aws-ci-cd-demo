@@ -27,7 +27,7 @@ env:
   JUMP_HOST: ${{ secrets.JUMP_HOST }}
   SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
   FRONTEND_HEALTH: "http://13.233.163.109/health"      # <<-- change to your real url
-  BACKEND_HEALTH: "http://13.233.163.109/api/health"  # <<-- change to your real url
+  BACKEND_HEALTH: "http://13.233.163.109/health/api"  # <<-- change to your real url
   HEALTH_STATUS: "200"
 
 jobs:
