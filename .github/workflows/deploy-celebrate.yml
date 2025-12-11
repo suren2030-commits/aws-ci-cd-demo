@@ -158,7 +158,8 @@ jobs:
           HEALTH_STATUS: ${{ env.HEALTH_STATUS }}
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} bash -s <<'REMOTE'
+          # Export REMOTE_APP_DIR on remote side by setting it inline before calling bash -s
+          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} "export REMOTE_APP_DIR='${{ secrets.REMOTE_APP_DIR }}'; bash -s" <<'REMOTE'
             set -euo pipefail
             ART="$HOME/frontend_build/frontend-dist.zip"
             bash ~/deploy_scripts/deploy_frontend.sh "$ART" "${REMOTE_APP_DIR}" "nginx"
@@ -205,7 +206,7 @@ REMOTE
           HEALTH_STATUS: ${{ env.HEALTH_STATUS }}
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} bash -s <<'REMOTE'
+          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} "export REMOTE_APP_DIR='${{ secrets.REMOTE_APP_DIR }}'; bash -s" <<'REMOTE'
             set -euo pipefail
             ART="$HOME/backend_build/backend-artifact.tar.gz"
             bash ~/deploy_scripts/deploy_backend.sh "$ART" "${REMOTE_APP_DIR}" "celebrate-backend"
