@@ -158,19 +158,10 @@ jobs:
           HEALTH_STATUS: ${{ env.HEALTH_STATUS }}
         run: |
           set -euo pipefail
-          # Export REMOTE_APP_DIR on remote side by setting it inline before calling bash -s
-          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} "export REMOTE_APP_DIR='${{ secrets.REMOTE_APP_DIR }}'; bash -s" <<'REMOTE'
-            set -euo pipefail
-            ART="$HOME/frontend_build/frontend-dist.zip"
-            bash ~/deploy_scripts/deploy_frontend.sh "$ART" "${REMOTE_APP_DIR}" "nginx"
-            if ~/deploy_scripts/health_check.sh "${FRONTEND_HEALTH}" "${HEALTH_STATUS}" "" 6 5; then
-              echo "FRONTEND OK"
-            else
-              echo "FRONTEND HEALTH CHECK FAILED - ROLLING BACK" >&2
-              ~/deploy_scripts/rollback_to_previous.sh "${REMOTE_APP_DIR}"
-              exit 1
-            fi
-REMOTE
+          # Run the remote deploy command. We export REMOTE_APP_DIR inline and run a bash -lc string so quoting is safe.
+          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} \
+            "REMOTE_APP_DIR='${{ secrets.REMOTE_APP_DIR }}' ART='\$HOME/frontend_build/frontend-dist.zip' bash -lc 'bash ~/deploy_scripts/deploy_frontend.sh \"\$ART\" \"\$REMOTE_APP_DIR\" nginx && if ~/deploy_scripts/health_check.sh \"${FRONTEND_HEALTH}\" \"${HEALTH_STATUS}\" \"\" 6 5; then echo OK; else ~/deploy_scripts/rollback_to_previous.sh \"\$REMOTE_APP_DIR\"; exit 1; fi'"
+
       - name: Notify Slack (frontend)
         if: ${{ env.SLACK_WEBHOOK != '' }}
         run: |
@@ -206,18 +197,9 @@ REMOTE
           HEALTH_STATUS: ${{ env.HEALTH_STATUS }}
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} "export REMOTE_APP_DIR='${{ secrets.REMOTE_APP_DIR }}'; bash -s" <<'REMOTE'
-            set -euo pipefail
-            ART="$HOME/backend_build/backend-artifact.tar.gz"
-            bash ~/deploy_scripts/deploy_backend.sh "$ART" "${REMOTE_APP_DIR}" "celebrate-backend"
-            if ~/deploy_scripts/health_check.sh "${BACKEND_HEALTH}" "${HEALTH_STATUS}" "" 6 5; then
-              echo "BACKEND OK"
-            else
-              echo "BACKEND HEALTH CHECK FAILED - ROLLING BACK" >&2
-              ~/deploy_scripts/rollback_to_previous.sh "${REMOTE_APP_DIR}"
-              exit 1
-            fi
-REMOTE
+          ssh -o StrictHostKeyChecking=no ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} \
+            "REMOTE_APP_DIR='${{ secrets.REMOTE_APP_DIR }}' ART='\$HOME/backend_build/backend-artifact.tar.gz' bash -lc 'bash ~/deploy_scripts/deploy_backend.sh \"\$ART\" \"\$REMOTE_APP_DIR\" celebrate-backend && if ~/deploy_scripts/health_check.sh \"${BACKEND_HEALTH}\" \"${HEALTH_STATUS}\" \"\" 6 5; then echo OK; else ~/deploy_scripts/rollback_to_previous.sh \"\$REMOTE_APP_DIR\"; exit 1; fi'"
+
       - name: Notify Slack (backend)
         if: ${{ env.SLACK_WEBHOOK != '' }}
         run: |
