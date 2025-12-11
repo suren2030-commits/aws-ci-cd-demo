@@ -144,10 +144,13 @@ jobs:
         with:
           name: frontend-dist
           path: .
-      - name: Setup ssh-agent and load key
-        uses: webfactory/ssh-agent@v0.8.1
-        with:
-          ssh-private-key: ${{ secrets.JUMP_SSH_KEY }}
+      - name: Setup SSH key (no external action)
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ env.JUMP_HOST }}" >> ~/.ssh/known_hosts || true
+          ls -l ~/.ssh/id_rsa
       - name: Copy artifact to jumpserver
         run: |
           scp -o StrictHostKeyChecking=no frontend-dist.zip ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/frontend_build/frontend-dist.zip
@@ -183,10 +186,13 @@ jobs:
         with:
           name: backend-artifact
           path: .
-      - name: Setup ssh-agent and load key
-        uses: webfactory/ssh-agent@v0.8.1
-        with:
-          ssh-private-key: ${{ secrets.JUMP_SSH_KEY }}
+      - name: Setup SSH key (no external action)
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ env.JUMP_HOST }}" >> ~/.ssh/known_hosts || true
+          ls -l ~/.ssh/id_rsa
       - name: Copy backend artifact to jumpserver
         run: |
           scp -o StrictHostKeyChecking=no backend-artifact.tar.gz ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/backend_build/backend-artifact.tar.gz
