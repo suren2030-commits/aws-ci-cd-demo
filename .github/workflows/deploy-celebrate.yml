@@ -32,7 +32,7 @@ env:
 
 jobs:
   determine:
-    name: Determine changed apps / intent
+    name: DETERMINE CHANGED APPS
     runs-on: ubuntu-latest
     outputs:
       frontend_should_run: ${{ steps.set.outputs.frontend }}
@@ -76,7 +76,7 @@ jobs:
           echo "Determined: frontend=$FRONT backend=$BACK"
 
   build-frontend:
-    name: Build Frontend
+    name: BUILD FRONTEND
     needs: determine
     if: needs.determine.outputs.frontend_should_run == 'true'
     runs-on: ubuntu-latest
@@ -102,7 +102,7 @@ jobs:
           path: frontend-dist.zip
 
   build-backend:
-    name: Build Backend
+    name: BUILD BACKEND
     needs: determine
     if: needs.determine.outputs.backend_should_run == 'true'
     runs-on: ubuntu-latest
@@ -131,7 +131,7 @@ jobs:
           path: backend-artifact.tar.gz
 
   deploy-frontend:
-    name: Deploy Frontend
+    name: DEPLOY FRONTEND
     needs: build-frontend
     if: needs.determine.outputs.frontend_should_run == 'true'
     runs-on: ubuntu-latest
@@ -173,7 +173,7 @@ jobs:
           curl -s -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "${{ env.SLACK_WEBHOOK }}" || true
 
   deploy-backend:
-    name: Deploy Backend
+    name: DEPLOY BACKEND
     needs: build-backend
     if: needs.determine.outputs.backend_should_run == 'true'
     runs-on: ubuntu-latest
