@@ -1,20 +1,13 @@
-"""
-Django settings for airport_kpi project.
-"""
-
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-7y#%vy4xlm+ok$ol+ruxbp9r1cthppx41p=23k6kuw%wdgnol%'
+SECRET_KEY = 'REPLACE_IN_PROD'
 
-# ❗ Production setting
-DEBUG = False
+DEBUG = False   # IMPORTANT
 
 ALLOWED_HOSTS = [
     "13.233.163.109",
-    "ec2-13-233-163-109.ap-south-1.compute.amazonaws.com",
     "localhost",
     "127.0.0.1",
 ]
@@ -67,45 +60,19 @@ DATABASES = {
     }
 }
 
-AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
-]
-
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# Django static not used here (Angular handles frontend)
 STATIC_URL = "/static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ✅ CORS FIX (THIS WAS THE MAIN ISSUE)
-CORS_ALLOW_ALL_ORIGINS = False
-
-CORS_ALLOWED_ORIGINS = [
-    "http://13.233.163.109",
-]
-
+# CORS
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-]
-
-# ✅ Required for proxied frontend → backend
-CSRF_TRUSTED_ORIGINS = [
-    "http://13.233.163.109",
-]
+# IMPORTANT FOR NGINX PROXY
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "http")
