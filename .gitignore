@@ -1,12 +1,13 @@
+# Backend runtime artifacts
+backend/current
+backend/releases
+backend/backend-artifact.tar.gz
+
 # Python
-.venv/
+venv/
 __pycache__/
 *.pyc
+db.sqlite3
 
-# Node / Angular
-node_modules/
-frontend/node_modules/
-
-# Editor
-.vscode/
-.idea/
+# Frontend build
+dist/
