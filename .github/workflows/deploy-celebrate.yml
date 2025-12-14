@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  determine:
+  DETERMINE:
     runs-on: ubuntu-latest
     outputs:
       frontend: ${{ steps.diff.outputs.frontend }}
@@ -29,7 +29,7 @@ jobs:
           echo "$FILES" | grep -q '^frontend/' && echo "frontend=true" >> $GITHUB_OUTPUT || echo "frontend=false" >> $GITHUB_OUTPUT
           echo "$FILES" | grep -q '^backend/'  && echo "backend=true"  >> $GITHUB_OUTPUT || echo "backend=false"  >> $GITHUB_OUTPUT
 
-  build-frontend:
+  BUILD-FRONTEND:
     needs: determine
     if: needs.determine.outputs.frontend == 'true'
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
           name: frontend-dist
           path: frontend-dist.zip
 
-  deploy-frontend:
+  DEPLOY-FRONTEND:
     needs: build-frontend
     runs-on: ubuntu-latest
     steps:
@@ -70,7 +70,7 @@ jobs:
           scp frontend-dist.zip ubuntu@${{ secrets.JUMP_HOST }}:~/frontend_tmp/frontend-dist.zip
           ssh ubuntu@${{ secrets.JUMP_HOST }} "bash ~/deploy_scripts/deploy_frontend.sh"
 
-  build-backend:
+  BUILD-BACKEND:
     needs: determine
     if: needs.determine.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
           python manage.py check
         working-directory: backend
 
-  deploy-backend:
+  DEPLOY-BACKEND:
     needs: build-backend
     runs-on: ubuntu-latest
     steps:
