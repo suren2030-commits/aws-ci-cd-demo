@@ -1,13 +1,15 @@
-# Backend runtime artifacts
+# Frontend runtime
+frontend/dist/
+frontend/node_modules/
+
+# Backend runtime
+backend/venv/
+backend/db.sqlite3
 backend/current
-backend/releases
+backend/releases/
 backend/backend-artifact.tar.gz
 
-# Python
-venv/
-__pycache__/
-*.pyc
-db.sqlite3
-
-# Frontend build
-dist/
+# OS / misc
+*.log
+*.zip
+*.tar.gz
