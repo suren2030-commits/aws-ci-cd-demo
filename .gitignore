@@ -13,3 +13,8 @@ backend/backend-artifact.tar.gz
 *.log
 *.zip
 *.tar.gz
+
+# Local dev environments
+.venv/
+.vscode/
+frontend/.vscode/
