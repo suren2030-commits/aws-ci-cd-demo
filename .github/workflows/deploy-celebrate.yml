@@ -82,7 +82,7 @@ jobs:
           name: frontend-dist
           path: frontend-dist.zip
 
-  deploy-frontend:
+     deploy-frontend:
     name: Deploy Frontend
     needs: build-frontend
     runs-on: ubuntu-latest
@@ -101,14 +101,19 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Prepare remote frontend_tmp dir
+        shell: bash
+        run: |
+          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} "mkdir -p ~/frontend_tmp"
+
       - name: Upload & deploy
         shell: bash
         run: |
-          scp frontend-dist.zip ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/frontend_tmp/frontend-dist.zip
+          scp frontend-dist.zip \
+            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/frontend_tmp/frontend-dist.zip
 
-          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} << 'EOF'
-            bash ~/deploy_scripts/deploy_frontend.sh
-          EOF
+          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+            "bash ~/deploy_scripts/deploy_frontend.sh"
 
       - name: Frontend health check
         run: |
