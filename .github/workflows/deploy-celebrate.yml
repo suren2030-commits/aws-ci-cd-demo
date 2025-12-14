@@ -3,40 +3,23 @@ name: Multi-stage Deploy (Celebrate)
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - '.github/workflows/deploy-celebrate.yml'
   workflow_dispatch:
-    inputs:
-      apps:
-        description: frontend | backend | both | auto
-        required: true
-        default: auto
-
-concurrency:
-  group: deploy-celebrate-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
 
 env:
-  JUMP_USER: ubuntu
-  JUMP_HOST: 172.31.7.37
-  FRONTEND_HEALTH: http://13.233.163.109/
+  APP_NAME: apoc
+  FRONTEND_HEALTH: http://13.233.163.109
   BACKEND_HEALTH: http://13.233.163.109/api/health/
-  HEALTH_STATUS: "200"
 
-# -------------------------------
-# DETERMINE WHAT CHANGED
-# -------------------------------
 jobs:
+# ------------------------------------------------------------
+# 1. DETERMINE WHAT CHANGED
+# ------------------------------------------------------------
   determine:
     runs-on: ubuntu-latest
     outputs:
       frontend: ${{ steps.diff.outputs.frontend }}
-      backend: ${{ steps.diff.outputs.backend }}
+      backend:  ${{ steps.diff.outputs.backend }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,30 +27,31 @@ jobs:
 
       - id: diff
         run: |
-          FRONT=false
-          BACK=false
-          INPUT="${{ github.event.inputs.apps || 'auto' }}"
+          BASE=$(git merge-base HEAD origin/main || echo "")
+          echo "Base commit: $BASE"
 
-          if [ "$INPUT" != "auto" ]; then
-            [ "$INPUT" = "frontend" ] && FRONT=true
-            [ "$INPUT" = "backend" ] && BACK=true
-            [ "$INPUT" = "both" ] && FRONT=true && BACK=true
-          else
-            FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} || true)
-            echo "$FILES" | grep '^frontend/' && FRONT=true || true
-            echo "$FILES" | grep '^backend/' && BACK=true || true
+          FRONTEND=false
+          BACKEND=false
+
+          if git diff --name-only $BASE HEAD | grep -q '^frontend/'; then
+            FRONTEND=true
           fi
 
-          echo "frontend=$FRONT" >> $GITHUB_OUTPUT
-          echo "backend=$BACK" >> $GITHUB_OUTPUT
+          if git diff --name-only $BASE HEAD | grep -q '^backend/'; then
+            BACKEND=true
+          fi
 
-# -------------------------------
-# BUILD FRONTEND
-# -------------------------------
+          echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
+          echo "backend=$BACKEND"   >> "$GITHUB_OUTPUT"
+
+# ------------------------------------------------------------
+# 2. BUILD FRONTEND
+# ------------------------------------------------------------
   build-frontend:
+    runs-on: ubuntu-latest
     needs: determine
     if: needs.determine.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -75,103 +59,165 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm ci
+      - name: Build Angular frontend
         working-directory: frontend
+        run: |
+          npm ci
+          npm run build
 
-      - run: npm run build
-        working-directory: frontend
-
-      - run: |
+      - name: Package frontend artifact
+        run: |
           cd frontend
-          zip -r ../frontend-dist.zip dist
+          zip -r frontend-dist.zip dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend-dist.zip
+          path: frontend/frontend-dist.zip
 
-# -------------------------------
-# BUILD BACKEND
-# -------------------------------
+# ------------------------------------------------------------
+# 3. BUILD BACKEND
+# ------------------------------------------------------------
   build-backend:
+    runs-on: ubuntu-latest
     needs: determine
     if: needs.determine.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
-        with:
-          python-version: 3.12
-
-      - run: |
-          pip install -r requirements.txt
-          python manage.py check
-        working-directory: backend
-
-      - run: |
-          mkdir backend_package
-          rsync -a backend/ backend_package/ --exclude venv --exclude db.sqlite3
-          tar -czf backend-artifact.tar.gz backend_package
+      - name: Package backend artifact
+        run: |
+          tar -czf backend-artifact.tar.gz backend
 
       - uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
           path: backend-artifact.tar.gz
 
-# -------------------------------
-# DEPLOY FRONTEND
-# -------------------------------
+# ------------------------------------------------------------
+# 4. DEPLOY FRONTEND
+# ------------------------------------------------------------
   deploy-frontend:
-    needs: build-frontend
     runs-on: ubuntu-latest
+    needs: [determine, build-frontend]
     if: needs.determine.outputs.frontend == 'true'
+
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
 
-      - run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ env.JUMP_HOST }} >> ~/.ssh/known_hosts
+      # --- SSH SETUP (DO NOT TOUCH) ---
+      - name: Setup SSH
+        run: |
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
 
-      - run: |
-          scp frontend-dist.zip ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/frontend_build/
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/github_actions"
+          chmod 600 "$HOME/.ssh/github_actions"
 
-      - run: |
-          ssh ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} \
-          "bash ~/deploy_scripts/deploy_frontend.sh"
+          cat <<EOF > "$HOME/.ssh/config"
+          Host jump
+            HostName ${{ secrets.JUMP_HOST }}
+            User ${{ secrets.JUMP_USER }}
+            IdentityFile ~/.ssh/github_actions
+            StrictHostKeyChecking no
 
-      - run: |
-          curl -f ${{ env.FRONTEND_HEALTH }}
+          Host app
+            HostName ${{ secrets.EC2_HOST }}
+            User ${{ secrets.EC2_USER }}
+            ProxyJump jump
+            IdentityFile ~/.ssh/github_actions
+            StrictHostKeyChecking no
+          EOF
 
-# -------------------------------
-# DEPLOY BACKEND
-# -------------------------------
+      - name: Upload & deploy frontend
+        run: |
+          scp frontend-dist.zip app:/home/ubuntu/frontend_tmp/
+
+          ssh app <<'EOF'
+            set -e
+
+            WEBROOT=/var/www/apoc-frontend
+            RELEASES=$WEBROOT/releases
+            TS=$(date +%Y%m%d-%H%M%S)
+            NEW=$RELEASES/$TS
+
+            mkdir -p "$NEW"
+            unzip -q /home/ubuntu/frontend_tmp/frontend-dist.zip -d "$NEW"
+
+            chown -R www-data:www-data "$NEW"
+            ln -sfn "$NEW/dist/frontend/browser" "$WEBROOT/current"
+
+            sudo systemctl reload nginx
+          EOF
+
+      - name: Frontend health check
+        run: |
+          curl -f --retry 5 --retry-delay 5 $FRONTEND_HEALTH
+
+# ------------------------------------------------------------
+# 5. DEPLOY BACKEND
+# ------------------------------------------------------------
   deploy-backend:
-    needs: build-backend
     runs-on: ubuntu-latest
+    needs: [determine, build-backend]
     if: needs.determine.outputs.backend == 'true'
+
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: backend-artifact
 
-      - run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ env.JUMP_HOST }} >> ~/.ssh/known_hosts
+      - name: Setup SSH
+        run: |
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
 
-      - run: |
-          scp backend-artifact.tar.gz \
-          ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/backend_build/
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/github_actions"
+          chmod 600 "$HOME/.ssh/github_actions"
 
-      - run: |
-          ssh ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }} \
-          "bash ~/deploy_scripts/deploy_backend.sh"
+          cat <<EOF > "$HOME/.ssh/config"
+          Host jump
+            HostName ${{ secrets.JUMP_HOST }}
+            User ${{ secrets.JUMP_USER }}
+            IdentityFile ~/.ssh/github_actions
+            StrictHostKeyChecking no
 
-      - run: |
-          curl -f ${{ env.BACKEND_HEALTH }}
+          Host app
+            HostName ${{ secrets.EC2_HOST }}
+            User ${{ secrets.EC2_USER }}
+            ProxyJump jump
+            IdentityFile ~/.ssh/github_actions
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Upload & deploy backend
+        run: |
+          scp backend-artifact.tar.gz app:/home/ubuntu/
+
+          ssh app <<'EOF'
+            set -e
+
+            APP=/home/ubuntu/apoc-backend
+            RELEASES=$APP/releases
+            TS=$(date +%Y%m%d-%H%M%S)
+            NEW=$RELEASES/$TS
+
+            mkdir -p "$NEW"
+            tar -xzf /home/ubuntu/backend-artifact.tar.gz -C "$NEW"
+
+            ln -sfn "$NEW/backend" "$APP/current"
+
+            cd "$APP/current"
+            source "$APP/venv/bin/activate"
+            pip install -r requirements.txt
+            python manage.py migrate --noinput
+
+            sudo systemctl restart apoc-backend
+          EOF
+
+      - name: Backend health check
+        run: |
+          curl -f --retry 5 --retry-delay 5 $BACKEND_HEALTH
