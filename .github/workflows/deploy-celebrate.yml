@@ -15,35 +15,38 @@ jobs:
 # 1. DETERMINE WHAT CHANGED
 # ------------------------------------------------------------
   determine:
-    runs-on: ubuntu-latest
-    outputs:
-      frontend: ${{ steps.diff.outputs.frontend }}
-      backend:  ${{ steps.diff.outputs.backend }}
+  runs-on: ubuntu-latest
+  outputs:
+    frontend: ${{ steps.diff.outputs.frontend }}
+    backend:  ${{ steps.diff.outputs.backend }}
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 2   # IMPORTANT
 
-      - id: diff
-        run: |
-          BASE=$(git merge-base HEAD origin/main || echo "")
-          echo "Base commit: $BASE"
+    - id: diff
+      run: |
+        FRONTEND=false
+        BACKEND=false
 
-          FRONTEND=false
-          BACKEND=false
+        echo "Changed files:"
+        git diff --name-only HEAD~1 HEAD || true
 
-          if git diff --name-only $BASE HEAD | grep -q '^frontend/'; then
-            FRONTEND=true
-          fi
+        if git diff --name-only HEAD~1 HEAD | grep -q '^frontend/'; then
+          FRONTEND=true
+        fi
 
-          if git diff --name-only $BASE HEAD | grep -q '^backend/'; then
-            BACKEND=true
-          fi
+        if git diff --name-only HEAD~1 HEAD | grep -q '^backend/'; then
+          BACKEND=true
+        fi
 
-          echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
-          echo "backend=$BACKEND"   >> "$GITHUB_OUTPUT"
+        echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
+        echo "backend=$BACKEND"   >> "$GITHUB_OUTPUT"
 
+        echo "Detected:"
+        echo "  frontend=$FRONTEND"
+        echo "  backend=$BACKEND"
 # ------------------------------------------------------------
 # 2. BUILD FRONTEND
 # ------------------------------------------------------------
