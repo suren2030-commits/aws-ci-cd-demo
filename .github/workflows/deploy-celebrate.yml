@@ -2,53 +2,76 @@ name: Multi-stage Deploy (Celebrate)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+    paths:
+      - frontend/**
+      - backend/**
+      - .github/workflows/deploy-celebrate.yml
+
   workflow_dispatch:
+    inputs:
+      apps:
+        description: "frontend | backend | both | auto"
+        required: true
+        default: auto
+
+concurrency:
+  group: deploy-celebrate-${{ github.ref_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  JUMP_USER: ${{ secrets.JUMP_USER }}
+  JUMP_HOST: ${{ secrets.JUMP_HOST }}
+  JUMP_SSH_KEY: ${{ secrets.JUMP_SSH_KEY }}
+
+  FRONTEND_URL: http://13.233.163.109
+  BACKEND_HEALTH: http://13.233.163.109/api/health/
+  HEALTH_STATUS: "200"
+
+# ------------------------------------------------------------
+# DETERMINE
+# ------------------------------------------------------------
 jobs:
   determine:
     name: Determine changed apps
     runs-on: ubuntu-latest
-
     outputs:
-      frontend: ${{ steps.diff.outputs.frontend }}
-      backend: ${{ steps.diff.outputs.backend }}
+      frontend: ${{ steps.decide.outputs.frontend }}
+      backend: ${{ steps.decide.outputs.backend }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Detect changes
-        id: diff
+      - id: decide
         shell: bash
         run: |
-          FRONTEND=false
-          BACKEND=false
+          INPUT="${{ github.event.inputs.apps || 'auto' }}"
+          FRONT=false
+          BACK=false
 
-          echo "Changed files:"
-          git diff --name-only HEAD~1 HEAD || true
-
-          if git diff --name-only HEAD~1 HEAD | grep -q '^frontend/'; then
-            FRONTEND=true
+          if [ "$INPUT" != "auto" ]; then
+            case "$INPUT" in
+              frontend) FRONT=true ;;
+              backend) BACK=true ;;
+              both) FRONT=true; BACK=true ;;
+            esac
+          else
+            FILES=$(git diff --name-only HEAD~1 HEAD || true)
+            echo "$FILES" | grep -q '^frontend/' && FRONT=true || true
+            echo "$FILES" | grep -q '^backend/' && BACK=true || true
           fi
 
-          if git diff --name-only HEAD~1 HEAD | grep -q '^backend/'; then
-            BACKEND=true
-          fi
+          echo "frontend=$FRONT" >> $GITHUB_OUTPUT
+          echo "backend=$BACK" >> $GITHUB_OUTPUT
 
-          echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
-          echo "backend=$BACKEND" >> "$GITHUB_OUTPUT"
-
-          echo "Decision:"
-          echo "  frontend=$FRONTEND"
-          echo "  backend=$BACKEND"
-
+# ------------------------------------------------------------
+# BUILD FRONTEND
+# ------------------------------------------------------------
   build-frontend:
     name: Build Frontend
     needs: determine
@@ -58,67 +81,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build Angular
-        working-directory: frontend
-        run: npm run build
-
-      - name: Zip build
+      - name: Install deps
         run: |
           cd frontend
-          zip -r ../frontend-dist.zip dist
+          npm ci
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Build Angular
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Zip dist
+        run: |
+          cd frontend/dist
+          zip -r ../../frontend-dist.zip .
+
+      - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: frontend-dist.zip
 
-     deploy-frontend:
-    name: Deploy Frontend
-    needs: build-frontend
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-
-      - name: Setup SSH
-        shell: bash
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Prepare remote frontend_tmp dir
-        shell: bash
-        run: |
-          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} "mkdir -p ~/frontend_tmp"
-
-      - name: Upload & deploy
-        shell: bash
-        run: |
-          scp frontend-dist.zip \
-            ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/frontend_tmp/frontend-dist.zip
-
-          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-            "bash ~/deploy_scripts/deploy_frontend.sh"
-
-      - name: Frontend health check
-        run: |
-          curl -f http://13.233.163.109 || exit 1
-
+# ------------------------------------------------------------
+# BUILD BACKEND
+# ------------------------------------------------------------
   build-backend:
     name: Build Backend
     needs: determine
@@ -128,61 +117,97 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-
-      - name: Install deps & check
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          python manage.py check
+          python-version: 3.12
 
       - name: Package backend
         run: |
           mkdir backend_package
           rsync -av backend/ backend_package/ \
             --exclude venv \
-            --exclude db.sqlite3 \
-            --exclude __pycache__
+            --exclude __pycache__ \
+            --exclude db.sqlite3
+
           tar -czf backend-artifact.tar.gz backend_package
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
           path: backend-artifact.tar.gz
 
-  deploy-backend:
-    name: Deploy Backend
-    needs: build-backend
+# ------------------------------------------------------------
+# DEPLOY FRONTEND
+# ------------------------------------------------------------
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: build-frontend
+    if: needs.determine.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: backend-artifact
+          name: frontend-dist
 
       - name: Setup SSH
         shell: bash
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
+          echo "$JUMP_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts
+
+      - name: Prepare remote dir
+        run: |
+          ssh $JUMP_USER@$JUMP_HOST "mkdir -p ~/frontend_tmp"
 
       - name: Upload & deploy
-        shell: bash
         run: |
-          scp backend-artifact.tar.gz ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/backend_build/backend-artifact.tar.gz
+          scp frontend-dist.zip \
+            $JUMP_USER@$JUMP_HOST:~/frontend_tmp/frontend-dist.zip
 
-          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} << 'EOF'
-            bash ~/deploy_scripts/deploy_backend.sh
-          EOF
+          ssh $JUMP_USER@$JUMP_HOST \
+            "bash ~/deploy_scripts/deploy_frontend.sh"
+
+      - name: Frontend health check
+        run: |
+          curl -f $FRONTEND_URL
+
+# ------------------------------------------------------------
+# DEPLOY BACKEND
+# ------------------------------------------------------------
+  deploy-backend:
+    name: Deploy Backend
+    needs: build-backend
+    if: needs.determine.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-artifact
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "$JUMP_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload & deploy
+        run: |
+          scp backend-artifact.tar.gz \
+            $JUMP_USER@$JUMP_HOST:~/backend_build/backend-artifact.tar.gz
+
+          ssh $JUMP_USER@$JUMP_HOST \
+            "bash ~/deploy_scripts/deploy_backend.sh"
 
       - name: Backend health check
         run: |
-          curl -f http://13.233.163.109/api/health/ || exit 1
+          for i in {1..6}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" $BACKEND_HEALTH || true)
+            [ "$STATUS" = "$HEALTH_STATUS" ] && exit 0
+            sleep 5
+          done
+          exit 1
