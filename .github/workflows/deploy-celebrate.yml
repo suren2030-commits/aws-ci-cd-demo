@@ -2,225 +2,182 @@ name: Multi-stage Deploy (Celebrate)
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
-env:
-  APP_NAME: apoc
-  FRONTEND_HEALTH: http://13.233.163.109
-  BACKEND_HEALTH: http://13.233.163.109/api/health/
+permissions:
+  contents: read
 
 jobs:
-# ------------------------------------------------------------
-# 1. DETERMINE WHAT CHANGED
-# ------------------------------------------------------------
   determine:
-  runs-on: ubuntu-latest
-  outputs:
-    frontend: ${{ steps.diff.outputs.frontend }}
-    backend:  ${{ steps.diff.outputs.backend }}
-
-  steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 2   # IMPORTANT
-
-    - id: diff
-      run: |
-        FRONTEND=false
-        BACKEND=false
-
-        echo "Changed files:"
-        git diff --name-only HEAD~1 HEAD || true
-
-        if git diff --name-only HEAD~1 HEAD | grep -q '^frontend/'; then
-          FRONTEND=true
-        fi
-
-        if git diff --name-only HEAD~1 HEAD | grep -q '^backend/'; then
-          BACKEND=true
-        fi
-
-        echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
-        echo "backend=$BACKEND"   >> "$GITHUB_OUTPUT"
-
-        echo "Detected:"
-        echo "  frontend=$FRONTEND"
-        echo "  backend=$BACKEND"
-# ------------------------------------------------------------
-# 2. BUILD FRONTEND
-# ------------------------------------------------------------
-  build-frontend:
+    name: Determine changed apps
     runs-on: ubuntu-latest
+
+    outputs:
+      frontend: ${{ steps.diff.outputs.frontend }}
+      backend: ${{ steps.diff.outputs.backend }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changes
+        id: diff
+        shell: bash
+        run: |
+          FRONTEND=false
+          BACKEND=false
+
+          echo "Changed files:"
+          git diff --name-only HEAD~1 HEAD || true
+
+          if git diff --name-only HEAD~1 HEAD | grep -q '^frontend/'; then
+            FRONTEND=true
+          fi
+
+          if git diff --name-only HEAD~1 HEAD | grep -q '^backend/'; then
+            BACKEND=true
+          fi
+
+          echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
+          echo "backend=$BACKEND" >> "$GITHUB_OUTPUT"
+
+          echo "Decision:"
+          echo "  frontend=$FRONTEND"
+          echo "  backend=$BACKEND"
+
+  build-frontend:
+    name: Build Frontend
     needs: determine
     if: needs.determine.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Build Angular frontend
+      - name: Install dependencies
         working-directory: frontend
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
 
-      - name: Package frontend artifact
+      - name: Build Angular
+        working-directory: frontend
+        run: npm run build
+
+      - name: Zip build
         run: |
           cd frontend
-          zip -r frontend-dist.zip dist
+          zip -r ../frontend-dist.zip dist
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/frontend-dist.zip
+          path: frontend-dist.zip
 
-# ------------------------------------------------------------
-# 3. BUILD BACKEND
-# ------------------------------------------------------------
-  build-backend:
-    runs-on: ubuntu-latest
-    needs: determine
-    if: needs.determine.outputs.backend == 'true'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Package backend artifact
-        run: |
-          tar -czf backend-artifact.tar.gz backend
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: backend-artifact
-          path: backend-artifact.tar.gz
-
-# ------------------------------------------------------------
-# 4. DEPLOY FRONTEND
-# ------------------------------------------------------------
   deploy-frontend:
+    name: Deploy Frontend
+    needs: build-frontend
     runs-on: ubuntu-latest
-    needs: [determine, build-frontend]
-    if: needs.determine.outputs.frontend == 'true'
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download artifact
+        uses: actions/download-artifact@v4
         with:
           name: frontend-dist
 
-      # --- SSH SETUP (DO NOT TOUCH) ---
       - name: Setup SSH
+        shell: bash
         run: |
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
 
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/github_actions"
-          chmod 600 "$HOME/.ssh/github_actions"
-
-          cat <<EOF > "$HOME/.ssh/config"
-          Host jump
-            HostName ${{ secrets.JUMP_HOST }}
-            User ${{ secrets.JUMP_USER }}
-            IdentityFile ~/.ssh/github_actions
-            StrictHostKeyChecking no
-
-          Host app
-            HostName ${{ secrets.EC2_HOST }}
-            User ${{ secrets.EC2_USER }}
-            ProxyJump jump
-            IdentityFile ~/.ssh/github_actions
-            StrictHostKeyChecking no
-          EOF
-
-      - name: Upload & deploy frontend
+      - name: Upload & deploy
+        shell: bash
         run: |
-          scp frontend-dist.zip app:/home/ubuntu/frontend_tmp/
+          scp frontend-dist.zip ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/frontend_tmp/frontend-dist.zip
 
-          ssh app <<'EOF'
-            set -e
-
-            WEBROOT=/var/www/apoc-frontend
-            RELEASES=$WEBROOT/releases
-            TS=$(date +%Y%m%d-%H%M%S)
-            NEW=$RELEASES/$TS
-
-            mkdir -p "$NEW"
-            unzip -q /home/ubuntu/frontend_tmp/frontend-dist.zip -d "$NEW"
-
-            chown -R www-data:www-data "$NEW"
-            ln -sfn "$NEW/dist/frontend/browser" "$WEBROOT/current"
-
-            sudo systemctl reload nginx
+          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} << 'EOF'
+            bash ~/deploy_scripts/deploy_frontend.sh
           EOF
 
       - name: Frontend health check
         run: |
-          curl -f --retry 5 --retry-delay 5 $FRONTEND_HEALTH
+          curl -f http://13.233.163.109 || exit 1
 
-# ------------------------------------------------------------
-# 5. DEPLOY BACKEND
-# ------------------------------------------------------------
-  deploy-backend:
-    runs-on: ubuntu-latest
-    needs: [determine, build-backend]
+  build-backend:
+    name: Build Backend
+    needs: determine
     if: needs.determine.outputs.backend == 'true'
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps & check
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python manage.py check
+
+      - name: Package backend
+        run: |
+          mkdir backend_package
+          rsync -av backend/ backend_package/ \
+            --exclude venv \
+            --exclude db.sqlite3 \
+            --exclude __pycache__
+          tar -czf backend-artifact.tar.gz backend_package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-artifact
+          path: backend-artifact.tar.gz
+
+  deploy-backend:
+    name: Deploy Backend
+    needs: build-backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
         with:
           name: backend-artifact
 
       - name: Setup SSH
+        shell: bash
         run: |
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.JUMP_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
 
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/github_actions"
-          chmod 600 "$HOME/.ssh/github_actions"
-
-          cat <<EOF > "$HOME/.ssh/config"
-          Host jump
-            HostName ${{ secrets.JUMP_HOST }}
-            User ${{ secrets.JUMP_USER }}
-            IdentityFile ~/.ssh/github_actions
-            StrictHostKeyChecking no
-
-          Host app
-            HostName ${{ secrets.EC2_HOST }}
-            User ${{ secrets.EC2_USER }}
-            ProxyJump jump
-            IdentityFile ~/.ssh/github_actions
-            StrictHostKeyChecking no
-          EOF
-
-      - name: Upload & deploy backend
+      - name: Upload & deploy
+        shell: bash
         run: |
-          scp backend-artifact.tar.gz app:/home/ubuntu/
+          scp backend-artifact.tar.gz ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}:~/backend_build/backend-artifact.tar.gz
 
-          ssh app <<'EOF'
-            set -e
-
-            APP=/home/ubuntu/apoc-backend
-            RELEASES=$APP/releases
-            TS=$(date +%Y%m%d-%H%M%S)
-            NEW=$RELEASES/$TS
-
-            mkdir -p "$NEW"
-            tar -xzf /home/ubuntu/backend-artifact.tar.gz -C "$NEW"
-
-            ln -sfn "$NEW/backend" "$APP/current"
-
-            cd "$APP/current"
-            source "$APP/venv/bin/activate"
-            pip install -r requirements.txt
-            python manage.py migrate --noinput
-
-            sudo systemctl restart apoc-backend
+          ssh ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} << 'EOF'
+            bash ~/deploy_scripts/deploy_backend.sh
           EOF
 
       - name: Backend health check
         run: |
-          curl -f --retry 5 --retry-delay 5 $BACKEND_HEALTH
+          curl -f http://13.233.163.109/api/health/ || exit 1
