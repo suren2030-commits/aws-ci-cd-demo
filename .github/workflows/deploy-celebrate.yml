@@ -195,6 +195,10 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ env.JUMP_HOST }} >> ~/.ssh/known_hosts
 
+      - name: Prepare frontend_build dir
+        run: |
+          ssh -o StrictHostKeyChecking=no $JUMP_USER@$JUMP_HOST "mkdir -p ~/frontend_build"
+
       - name: Upload + deploy
         run: |
           scp frontend-dist.zip ${{ env.JUMP_USER }}@${{ env.JUMP_HOST }}:~/frontend_build/
